@@ -1,12 +1,12 @@
-Ideia de post: Utilizando ECS com Terraform e Gitlab CI
+Title: Service Management using AWS ECS, Terraform, and Gitlab CI: A Didactic Guide
 
-Em algum momento, você já deve ter se deparado com a seguinte questão: "Como gerenciar e atualizar múltiplos serviços rodando simultaneamente no meu servidor?" A resposta para este desafio, na verdade, é mais simples do que parece. Neste post, iremos explorar uma maneira eficiente e elegante de resolver esse problema. Vamos abordar a criação de um container individual para cada serviço, a utilização do AWS ECS para gerenciá-los de forma eficaz e, por fim, a implementação do Gitlab CI para garantir atualizações consistentes e sem esforço desses containers. Continue lendo e descubra como tornar a gestão do seu servidor um processo mais tranquilo e eficiente!
+At some point, you may have encountered the following question: "How can I manage and update multiple services running simultaneously on my server?" The answer to this challenge is, in fact, simpler than it seems. In this post, we will explore an efficient and elegant way to solve this problem. We will discuss creating an individual container for each service, using AWS ECS to manage them effectively, and finally, implementing Gitlab CI to ensure consistent and effortless updates of these containers. Continue reading and discover how to make the management of your server a more peaceful and efficient process!
 
-Capitulo 1: Terraform
+Chapter 1: Terraform
 
-O Terraform é uma ferramenta que permite escrever infraestrutura como código (IaC), facilitando o gerenciamento e a automação de recursos de TI.
+Terraform is a tool that allows you to write Infrastructure as Code (IaC), making it easier to manage and automate IT resources.
 
-Iniciamos a configuração criando um arquivo chamado main.tf. Este arquivo será a base da nossa infraestrutura.
+We start the configuration by creating a file called main.tf. This file will be the foundation of our infrastructure.
 
 ```
 provider "aws" {
@@ -137,30 +137,36 @@ Finalmente, é hora de executar nosso container em um serviço do ECS. Cada serv
 Para isso, criaremos o arquivo aws-ecs-task.tf:
 
 ```
-# Define para aparecerem logs
-
+# Setting up logging with CloudWatch
 resource "aws_cloudwatch_log_group" "devninja_worker_nodejs" {
   name = "/ecs/devninja_worker_nodejs"
-  retention_in_days = 14
+  retention_in_days = 14  # Logs will be retained for 14 days
 }
 
-# Task Definition (usaremos a imagem do apache como exemplo)
-
+# Task Definition (We will use the Apache image as an example)
 resource "aws_ecs_task_definition" "devninja_worker_nodejs" {
   family                   = "devninja_worker_nodejs"
-  network_mode             = "bridge"
-  cpu                      = "256"
-  memory                   = "128"
-  requires_compatibilities = ["EC2"]
+  network_mode             = "bridge"  # Using bridge network mode
+  cpu                      = "256"  # CPU value for the task
+  memory                   = "128"  # Memory value for the task
+  requires_compatibilities = ["EC2"]  # This task requires EC2 compatibility
 
+  # Container definitions specify the Docker image and configuration options for each container in the task
   container_definitions = <<DEFINITION
   [
     {
       "name": "devninja_worker_nodejs",
-      "image": "${aws_ecr_repository.devninja_ecr_1.repository_url}:main",
+      "image": "${aws_ecr_repository.devninja_ecr_1.repository_url}:main",  # Using the Docker image from our ECR repository
       "cpu": 256,
       "memory": 128,
       "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
@@ -174,14 +180,13 @@ resource "aws_ecs_task_definition" "devninja_worker_nodejs" {
   DEFINITION
 }
 
-# Adicionando ao cluster nossa task
-
+# Adding our task to the cluster
 resource "aws_ecs_service" "devninja_worker_nodejs" {
   name            = "devninja_worker_nodejs"
   cluster         = aws_ecs_cluster.devninja_worker.id
   task_definition = aws_ecs_task_definition.devninja_worker_nodejs.arn
-  desired_count   = 1
-  launch_type     = "EC2"
+  desired_count   = 1  # We want one running instance of this task
+  launch_type     = "EC2"  # This service will run on EC2 instances
 }
 ```
 
