@@ -1,31 +1,39 @@
-Title: Service Management using AWS ECS, Terraform, and Gitlab CI: A Didactic Guide
+## AWS ECS: Managing Multiple Containers in an Easy Way.
 
-At some point, you may have encountered the following question: "How can I manage and update multiple services running simultaneously on my server?" The answer to this challenge is, in fact, simpler than it seems. In this post, we will explore an efficient and elegant way to solve this problem. We will discuss creating an individual container for each service, using AWS ECS to manage them effectively, and finally, implementing Gitlab CI to ensure consistent and effortless updates of these containers. Continue reading and discover how to make the management of your server a more peaceful and efficient process!
+At some point, you may have encountered the following question: “How can I manage and update multiple services running simultaneously on my server?” The answer to this challenge is, in fact, simpler than it seems. In this post, we will explore an efficient and elegant way to solve this problem. We will discuss creating an individual container for each service, using AWS ECS to manage them effectively, and finally, implementing Gitlab CI to ensure consistent and effortless updates of these containers. Continue reading and discover how to make the management of your server a more peaceful and efficient process!
 
-Chapter 1: Terraform
+### Chapter 1: Terraform
 
 Terraform is a tool that allows you to write Infrastructure as Code (IaC), making it easier to manage and automate IT resources.
 
 We start the configuration by creating a file called main.tf. This file will be the foundation of our infrastructure.
 
-```
+```sh
 provider "aws" {
     region = "us-east-1"
 }
 ```
 
-Este código especifica que estaremos utilizando a AWS como provedor de infraestrutura, especificamente na região us-east-1.
+This code specifies that we will be using AWS as our infrastructure provider, specifically in the us-east-1 region.
 
-Em seguida, criamos o arquivo aws-ecs.tf. Este arquivo será responsável por criar o cluster do AWS ECS e definir suas permissões:
+Next, we create the aws-ecs.tf file. This file will be responsible for creating the AWS ECS cluster and defining its permissions:
 
-```
+```sh
+# This resource block creates an Amazon Elastic Container Service (ECS) cluster.
+# An ECS cluster is a logical grouping of tasks or services. In this case, the 
+# cluster is named "devninja_worker".
 resource "aws_ecs_cluster" "devninja_worker" {
   name = "devninja_worker"
 }
 
+# Here we're creating an AWS IAM (Identity and Access Management) role.
+# IAM roles are a secure way to grant permissions to entities that you trust.
+# This IAM role is named "ecs_role".
 resource "aws_iam_role" "ecs_role" {
   name = "ecs_role"
 
+  # The 'assume_role_policy' is a policy that grants an entity permission to assume the role.
+  # In this case, it allows the EC2 service to assume this role.
   assume_role_policy = <<EOF
 {
   "Version": "2012-10-17",
@@ -43,55 +51,72 @@ resource "aws_iam_role" "ecs_role" {
 EOF
 }
 
+# This block attaches a policy to the "ecs_role" IAM role.
+# The policy being attached provides the permissions necessary for ECS to make calls to AWS APIs on your behalf.
 resource "aws_iam_role_policy_attachment" "ecs_role_attachment" {
   role       = aws_iam_role.ecs_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
+# This block attaches another policy to the "ecs_role" IAM role.
+# The policy being attached provides read-only access to Amazon ECR (Elastic Container Registry).
+# This allows ECS tasks to pull Docker images from ECR.
 resource "aws_iam_role_policy_attachment" "ecs_ecr_attachment" {
   role       = aws_iam_role.ecs_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
 }
 
+# This creates an IAM instance profile that we can associate with our EC2 instances.
+# EC2 instances use instance profiles to make secure API requests.
+# Here, we are associating the "ecs_role" IAM role with the instance profile.
 resource "aws_iam_instance_profile" "ecs_instance_profile" {
   name = "ecs_instance_profile"
   role = aws_iam_role.ecs_role.name
 }
 ```
 
-Este código cria um cluster ECS chamado devninja_worker e define uma série de políticas de permissão para o mesmo.
+This code creates an ECS cluster named devninja_worker and sets a series of permission policies for it.
 
-Agora que temos nosso cluster, devemos adicionar uma instância (EC2) a ele.
+Now that we have our cluster, we should add an instance (EC2) to it.
 
-Para adicionar uma instância ao AWS ECS, é necessário que ela tenha uma imagem de máquina da Amazon (AMI) compatível (Amazon ECS-optimized Amazon Linux 2 AMI). Além disso, ao iniciar a máquina, ela deve executar o comando de inicialização.
+To add an instance to AWS ECS, it is necessary that it has a compatible Amazon Machine Image (AMI) (Amazon ECS-optimized Amazon Linux 2 AMI). Furthermore, when the machine starts, it must run the startup command.
 
-Criaremos uma pasta chamada assets e, dentro dela, o arquivo ecs-instance.sh:
+We will create a folder called assets and, inside it, the file ecs-instance.sh:
 
-assets/ecs-instance.sh
+assets/ecs-instance.sh:
 
-```
+```sh
 #!/bin/bash
 echo ECS_CLUSTER=${cluster_name} >> /etc/ecs/ecs.config
 ```
 
-Este script define a variável ECS_CLUSTER no arquivo de configuração do ECS, que especifica a qual cluster a instância EC2 pertencerá.
+This script sets the ECS_CLUSTER variable in the ECS configuration file, which specifies to which cluster the EC2 instance will belong.
 
-Continuamos a configuração com o arquivo aws-ecs-ec2.tf:
+We continue the configuration with the aws-ecs-ec2.tf file:
 
-```
-# Instance
+```sh
+# This resource block creates an AWS Security Group. 
+# Security groups act as a virtual firewall for your instance to control inbound and outbound traffic.
 resource "aws_security_group" "ecs_tasks" {
+  # The name of the security group.
   name        = "ecs_tasks_sg"
+  # Description for the security group.
   description = "Allow inbound traffic on all ports"
 
+  # Ingress rules define what kind of traffic is allowed into the instances attached to this security group.
   ingress {
+    # 'from_port' and 'to_port' both being 0 means all ports are allowed.
     from_port   = 0
     to_port     = 0
+    # 'protocol' being 'ALL' means all protocols are allowed.
     protocol    = "ALL"
+    # 'cidr_blocks' being ["0.0.0.0/0"] means the traffic can originate from anywhere.
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Egress rules define what kind of traffic is allowed out from the instances attached to this security group.
   egress {
+    # Similar to the ingress rule above, all traffic is allowed to go out to any IP on any protocol and port.
     from_port   = 0
     to_port     = 0
     protocol    = "ALL"
@@ -99,44 +124,68 @@ resource "aws_security_group" "ecs_tasks" {
   }
 }
 
+# This resource block creates an AWS EC2 instance. EC2 instances are virtual servers in Amazon's Elastic Compute Cloud (EC2) for running applications.
 resource "aws_instance" "ecs_instance" {
-  ami           = "ami-0ebb9b1c37ef501ab" # Replace with the latest Amazon ECS-optimized Amazon Linux 2 AMI
+  # The ID of the AMI, or Amazon Machine Image, which provides the information required to launch the instance.
+  # You will need to replace this with the latest Amazon ECS-optimized Amazon Linux 2 AMI.
+  ami           = "ami-0ebb9b1c37ef501ab"
+  
+  # The instance type. This defines the hardware of the host computer for the instance.
   instance_type = "t3.small"
+  
+  # The name of the key pair to use for the instance.
   key_name      = "ttl-servers"
 
+  # An instance profile is a way to grant the necessary permissions to the EC2 instance that your ECS tasks run on.
+  # We're referring to the name of the IAM instance profile that we created earlier.
   iam_instance_profile = aws_iam_instance_profile.ecs_instance_profile.name
 
+  # User data is used to configure the instance upon launch. 
+  # Here, we're providing a shell script (ecs_instance.sh) as a template file, which sets the ECS cluster name.
   user_data = templatefile("${path.module}/assets/ecs_instance.sh", { cluster_name = aws_ecs_cluster.ttl_worker.name })
 
+  # A list of security group IDs to assign to the instance. Here we're using the ID of the security group we created earlier.
   vpc_security_group_ids = [aws_security_group.ecs_tasks.id]
 
+  # Tags are used to assign metadata to AWS resources. Here, we're assigning a Name tag to the instance.
   tags = {
     Name = "ECS Instance"
   }
 }
 ```
 
-Esse código cria uma instância EC2 e a conecta ao nosso cluster ECS. Note que estamos utilizando a última versão da AMI otimizada para o ECS em uma instância do tipo t3.small.
+This code creates an EC2 instance and connects it to our ECS cluster. Note that we are using the latest version of the ECS-optimized AMI in a t3.small instance type.
 
-Agora que temos o cluster AWS ECS configurado e uma máquina EC2 integrada a ele, nós devemos ser capazes de subir nosso Dockerfile para a AWS. Para isso, usaremos o AWS ECR e o arquivo aws-ecr.tf.
+Now that we have the AWS ECS cluster set up and an EC2 machine integrated with it, we should be able to upload our Dockerfile to AWS. For this, we will use AWS ECR and the aws-ecr.tf file:
 
-```
+```sh
+# This resource block creates an AWS ECR (Elastic Container Registry) repository.
 resource "aws_ecr_repository" "devninja_ecr_1" {
-  name                 = "devninja_ecr_1"
+
+  # The 'name' attribute specifies the name of the ECR repository.
+  name = "devninja_ecr_1"
+
+  # The 'image_tag_mutability' attribute determines whether image tags can be overwritten.
+  # Setting this to 'MUTABLE' allows existing image tags to be overwritten by subsequent pushes.
   image_tag_mutability = "MUTABLE"
+
+  # The 'image_scanning_configuration' block is used to configure image scanning settings for the repository.
   image_scanning_configuration {
+
+    # The 'scan_on_push' attribute determines whether images are scanned for vulnerabilities upon being pushed to the repository.
+    # Setting this to 'true' enables automatic scanning upon each push.
     scan_on_push = true
   }
 }
 ```
 
-Este código cria um repositório ECR chamado devninja_ecr_1, onde armazenaremos nossas imagens Docker.
+This code creates an ECR repository called devninja_ecr_1, where we will store our Docker images.
 
-Finalmente, é hora de executar nosso container em um serviço do ECS. Cada serviço requer uma 'task definition'. Uma 'task definition' do AWS ECS é um arquivo em formato JSON que descreve um ou mais contêineres que compõem a sua aplicação. Essa definição especifica as configurações dos contêineres, incluindo os recursos que eles precisam, como CPU e memória, além de quais imagens Docker usar, quais portas de rede expor, e muito mais. É, em essência, a 'receita' para a sua aplicação dentro do ambiente AWS ECS.
+Finally, it’s time to run our container in an ECS service. Each service requires a ‘task definition’. An AWS ECS task definition is a JSON file that describes one or more containers that make up your application. This definition specifies the container settings, including the resources they need, such as CPU and memory, which Docker images to use, which network ports to expose, and much more. It is, in essence, the ‘recipe’ for your application within the AWS ECS environment.
 
-Para isso, criaremos o arquivo aws-ecs-task.tf:
+For this, we will create the aws-ecs-task.tf file:
 
-```
+```sh
 # Setting up logging with CloudWatch
 resource "aws_cloudwatch_log_group" "devninja_worker_nodejs" {
   name = "/ecs/devninja_worker_nodejs"
@@ -190,11 +239,10 @@ resource "aws_ecs_service" "devninja_worker_nodejs" {
 }
 ```
 
-Este bloco de código faz várias coisas. Primeiro, ele cria um grupo de logs no CloudWatch, que armazenará os logs da nossa aplicação. Em seguida, ele define uma 'task definition' para um contêiner contendo a nossa imagem do AWS ECR, incluindo a quantidade de CPU e memória que o contêiner deve usar, e a configuração de log que o contêiner deve seguir.
+This block of code does several things. First, it creates a CloudWatch log group that will store the logs of our application. Then, it defines a ‘task definition’ for a container holding our AWS ECR image, including the amount of CPU and memory that the container should use, and the log configuration that the container should follow and the ports that need to be opened by the container.
 
-Finalmente, ele adiciona a nossa 'task definition' ao nosso cluster ECS. Observe que estamos usando o tipo de lançamento "EC2", o que significa que o nosso contêiner será executado em uma instância EC2.
+Finally, it adds our ‘task definition’ to our ECS cluster. Note that we are using the “EC2” launch type, which means that our container will run on an EC2 instance.
 
-Neste ponto, temos um cluster ECS configurado e rodando com um único serviço. Mas como podemos garantir que as alterações no nosso código sejam refletidas no nosso serviço? A resposta é o Gitlab CI.
+At this point, we have an ECS cluster configured and running with a single service. But how can we ensure that changes to our code are reflected in our service? The answer is Gitlab CI.
 
-Continua...
-Espero que até aqui você tenha achado este guia útil. Se tiver alguma dúvida ou sugestão, não hesite em deixar um comentário abaixo!
+To be continued… I hope you’ve found this guide helpful so far. If you have any questions or suggestions, please don’t hesitate to leave a comment below!
